@@ -44,7 +44,7 @@ return {
           return
         end
 
-        -- Tsserver usually works poorly. Sorry you work with bad languages
+        -- Tsserver usually works poorly.
         -- You can remove this line if you know what you're doing :)
         if client.name == 'tsserver' then
           return

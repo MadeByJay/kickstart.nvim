@@ -18,8 +18,19 @@ return {
     'williamboman/mason.nvim',
     'jay-babu/mason-nvim-dap.nvim',
 
+    "nvim-telescope/telescope-dap.nvim",
     -- -- Add your own debuggers here
     -- 'leoluz/nvim-dap-go',
+    { "mxsdev/nvim-dap-vscode-js", dependencies = { "mfussenegger/nvim-dap" } },
+    {
+      "microsoft/vscode-js-debug",
+      -- commit = '46c6e8751c54b818f29d3ad91ae235b85137d7af',
+      lazy = true,
+      -- build = "npm install --legacy-peer-deps && npm run compile",
+      build = "npm install && npx gulp vsDebugServerBundle && mv dist out",
+
+    },
+
   },
   config = function()
     local dap = require 'dap'
@@ -28,13 +39,14 @@ return {
     require('mason-nvim-dap').setup {
       -- Makes a best effort to setup the various debuggers with
       -- reasonable debug configurations
-      automatic_setup = true,
+      -- automatic_setup = true,
 
       -- You'll need to check that you have the required things installed
       -- online, please don't ask me how to install them :)
       ensure_installed = {
         -- Update this to ensure that you have the debuggers for the langs you want
         --[[ 'delve', ]]
+        "python", "js", "node2", "chrome"
       },
     }
 
@@ -50,6 +62,13 @@ return {
     vim.keymap.set('n', '<leader>b', dap.toggle_breakpoint)
     vim.keymap.set('n', '<leader>B', function()
       dap.set_breakpoint(vim.fn.input 'Breakpoint condition: ')
+    end)
+
+    -- Start debugging session
+    vim.keymap.set("n", "<F6>", function()
+      dap.continue()
+      dapui.toggle({})
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-w>=", false, true, true), "n", false) -- Spaces buffers evenly
     end)
 
     -- Dap UI setup
@@ -78,6 +97,49 @@ return {
     dap.listeners.before.event_exited['dapui_config'] = dapui.close
 
     -- Install golang specific config
-    require('dap-go').setup()
+    -- require('dap-go').setup()
+
+    -- local DEBUGGER_PATH = vim.fn.stdpath "data" .. "/lazy/vscode-js-debug"
+
+    require("dap-vscode-js").setup {
+      -- node_path = "node",
+      debugger_path = vim.fn.stdpath "data" .. "/lazy/vscode-js-debug",
+      -- debugger_cmd = { "js-debug-adapter" },
+      adapters = { "pwa-node", "pwa-chrome", "pwa-msedge", "node-terminal", "pwa-extensionHost" }, -- which adapters to register in nvim-dap
+    }
+
+    for _, language in ipairs { "typescript", "javascript" } do
+      require("dap").configurations[language] = {
+        {
+          type = "pwa-node",
+          request = "launch",
+          name = "Launch file",
+          program = "${file}",
+          cwd = "${workspaceFolder}",
+        },
+        {
+          type = "pwa-node",
+          request = "attach",
+          name = "Attach",
+          processId = require("dap.utils").pick_process,
+          cwd = "${workspaceFolder}",
+        },
+        {
+          type = "pwa-node",
+          request = "launch",
+          name = "Debug Jest Tests",
+          -- trace = true, -- include debugger info
+          runtimeExecutable = "node",
+          runtimeArgs = {
+            "./node_modules/jest/bin/jest.js",
+            "--runInBand",
+          },
+          rootPath = "${workspaceFolder}",
+          cwd = "${workspaceFolder}",
+          console = "integratedTerminal",
+          internalConsoleOptions = "neverOpen",
+        },
+      }
+    end
   end,
 }
