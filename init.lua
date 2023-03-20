@@ -80,6 +80,7 @@ require('lazy').setup({
       -- Automatically install LSPs to stdpath for neovim
       'williamboman/mason.nvim',
       'williamboman/mason-lspconfig.nvim',
+      'b0o/SchemaStore.nvim',
 
       -- Useful status updates for LSP
       -- NOTE: `opts = {}` is the same as calling `require('fidget').setup({})`
@@ -92,12 +93,26 @@ require('lazy').setup({
 
   { -- Autocompletion
     'hrsh7th/nvim-cmp',
-    dependencies = { 'hrsh7th/cmp-nvim-lsp', 'L3MON4D3/LuaSnip', 'saadparwaiz1/cmp_luasnip' },
+    dependencies = {
+      'hrsh7th/cmp-nvim-lsp',
+      'hrsh7th/cmp-buffer',
+      'hrsh7th/cmp-cmdline',
+      'hrsh7th/cmp-nvim-lsp-document-symbol',
+      'hrsh7th/cmp-nvim-lsp-signature-help',
+      'ray-x/cmp-treesitter',
+      'hrsh7th/cmp-path',
+      'petertriho/cmp-git',
+      'L3MON4D3/LuaSnip',
+      'saadparwaiz1/cmp_luasnip',
+      'David-Kunz/cmp-npm',
+      'hrsh7th/cmp-omni',
+      'amarakon/nvim-cmp-buffer-lines',
+    },
   },
 
   -- Useful plugin to show you pending keybinds.
   { 'folke/which-key.nvim',          opts = {} },
-  { -- Adds git releated signs to the gutter, as well as utilities for managing changes
+  { -- Adds git related signs to the gutter, as well as utilities for managing changes
     'lewis6991/gitsigns.nvim',
     opts = {
       -- See `:help gitsigns.txt`
@@ -113,10 +128,10 @@ require('lazy').setup({
 
   { -- Theme inspired by Atom
     'navarasu/onedark.nvim',
-    priority = 1000,
-    config = function()
-      vim.cmd.colorscheme 'onedark'
-    end,
+    -- priority = 1000,
+    -- config = function()
+    --   vim.cmd.colorscheme 'onedark'
+    -- end,
   },
 
   { -- Set lualine as statusline
@@ -125,7 +140,7 @@ require('lazy').setup({
     opts = {
       options = {
         icons_enabled = false,
-        theme = 'onedark',
+        theme = 'tokyonight',
         component_separators = '|',
         section_separators = '',
       },
@@ -139,11 +154,43 @@ require('lazy').setup({
     opts = {
       char = '┊',
       show_trailing_blankline_indent = false,
+      show_first_indent_level = true,
+      use_treesitter = true,
+      show_current_context = true,
+      buftype_exclude = { 'terminal', 'nofile' },
+      filetype_exclude = {
+        'help',
+        'packer',
+        'NvimTree',
+      },
     },
   },
 
   -- "gc" to comment visual regions/lines
-  { 'numToStr/Comment.nvim',         opts = {} },
+  {
+    'numToStr/Comment.nvim',
+    opts = {},
+    dependencies = { 'JoosepAlviste/nvim-ts-context-commentstring' },
+    config = function()
+      require('Comment').setup {
+        pre_hook = function(ctx)
+          local U = require 'Comment.utils'
+
+          local location = nil
+          if ctx.ctype == U.ctype.blockwise then
+            location = require('ts_context_commentstring.utils').get_cursor_location()
+          elseif ctx.cmotion == U.cmotion.v or ctx.cmotion == U.cmotion.V then
+            location = require('ts_context_commentstring.utils').get_visual_start_location()
+          end
+
+          return require('ts_context_commentstring.internal').calculate_commentstring {
+            key = ctx.ctype == U.ctype.linewise and '__default' or '__multiline',
+            location = location,
+          }
+        end,
+      }
+    end,
+  },
 
   -- Fuzzy Finder (files, lsp, etc)
   { 'nvim-telescope/telescope.nvim', version = '*', dependencies = { 'nvim-lua/plenary.nvim' } },
@@ -165,6 +212,7 @@ require('lazy').setup({
     'nvim-treesitter/nvim-treesitter',
     dependencies = {
       'nvim-treesitter/nvim-treesitter-textobjects',
+      'nvim-treesitter/nvim-treesitter-refactor',
     },
     config = function()
       pcall(require('nvim-treesitter.install').update { with_sync = true })
@@ -190,6 +238,12 @@ require('lazy').setup({
 
 -- [[ Setting options ]]
 -- See `:help vim.o`
+
+-- the number of spaces inserted for each indentation
+vim.opt.shiftwidth = 2
+
+-- insert 2 spaces for a tab
+vim.opt.tabstop = 4
 
 -- Set highlight on search
 vim.o.hlsearch = false
@@ -224,10 +278,22 @@ vim.o.timeout = true
 vim.o.timeoutlen = 300
 
 -- Set completeopt to have a better completion experience
-vim.o.completeopt = 'menuone,noselect'
+vim.o.completeopt = 'menu,menuone,noselect'
+vim.opt.completeopt = { 'menu', 'menuone', 'noselect' }
 
 -- NOTE: You should make sure your terminal supports this
 vim.o.termguicolors = true
+
+vim.opt.splitbelow = true -- force all horizontal splits to go below current window
+vim.opt.splitright = true -- force all vertical splits to go to the right of current window
+vim.opt.swapfile = false -- creates a swapfile
+vim.opt.writebackup = false -- if a file is being edited by another program (or was written to file while editing with another program), it is not allowed to be edited
+vim.opt.scrolloff = 8 -- is one of my fav
+vim.opt.sidescrolloff = 8
+vim.opt.foldmethod = 'expr'
+vim.opt.foldexpr = 'nvim_treesitter#foldexpr()'
+-- opt.nofoldenable                      --Disable folding at startup.
+vim.o.foldenable = false
 
 -- [[ Basic Keymaps ]]
 
@@ -252,19 +318,64 @@ vim.api.nvim_create_autocmd('TextYankPost', {
 
 -- [[ Configure Telescope ]]
 -- See `:help telescope` and `:help telescope.setup()`
+
+-- This is required because Telescope has a bug that breaks code folds when it opens files: https://github.com/nvim-telescope/telescope.nvim/issues/559
+
+local function stopinsert(callback)
+  return function(prompt_bufnr)
+    vim.cmd.stopinsert()
+    vim.schedule(function()
+      callback(prompt_bufnr)
+    end)
+  end
+end
+
+local function stopinsert_fb(callback, callback_dir)
+  return function(prompt_bufnr)
+    local entry = require('telescope.actions.state').get_selected_entry()
+    if entry and not entry.Path:is_dir() then
+      stopinsert(callback)(prompt_bufnr)
+    elseif callback_dir then
+      callback_dir(prompt_bufnr)
+    end
+  end
+end
+
+local actions = require 'telescope.actions'
+local actions_fb = require('telescope').extensions.file_browser.actions
+-- This is required because Telescope has a bug that breaks code folds when it opens files: https://github.com/nvim-telescope/telescope.nvim/issues/559
+
 require('telescope').setup {
   defaults = {
     mappings = {
       i = {
+        ['<CR>'] = stopinsert(actions.select_default),
+        ['<C-x>'] = stopinsert(actions.select_horizontal),
+        ['<C-v>'] = stopinsert(actions.select_vertical),
+        ['<C-t>'] = stopinsert(actions.select_tab),
         ['<C-u>'] = false,
         ['<C-d>'] = false,
       },
     },
   },
+  extensions = {
+    file_browser = {
+      mappings = {
+        i = {
+          ['<CR>'] = stopinsert_fb(actions.select_default, actions.select_default),
+          ['<C-x>'] = stopinsert_fb(actions.select_horizontal),
+          ['<C-v>'] = stopinsert_fb(actions.select_vertical),
+          ['<C-t>'] = stopinsert_fb(actions.select_tab, actions_fb.change_cwd),
+        },
+      },
+    },
+  },
+  file_ignore_patterns = { '.git/', 'node_modules/' },
 }
 
 -- Enable telescope fzf native, if installed
 pcall(require('telescope').load_extension, 'fzf')
+pcall(require('telescope').load_extension, 'file_browser')
 
 -- See `:help telescope.builtin`
 vim.keymap.set('n', '<leader>?', require('telescope.builtin').oldfiles, { desc = '[?] Find recently opened files' })
@@ -277,6 +388,7 @@ vim.keymap.set('n', '<leader>/', function()
   })
 end, { desc = '[/] Fuzzily search in current buffer' })
 
+vim.keymap.set('n', '<C-p>', require('telescope.builtin').find_files, { desc = '[S]earch [F]iles' })
 vim.keymap.set('n', '<leader>sf', require('telescope.builtin').find_files, { desc = '[S]earch [F]iles' })
 vim.keymap.set('n', '<leader>sh', require('telescope.builtin').help_tags, { desc = '[S]earch [H]elp' })
 vim.keymap.set('n', '<leader>sw', require('telescope.builtin').grep_string, { desc = '[S]earch current [W]ord' })
@@ -288,7 +400,7 @@ vim.keymap.set('n', '<leader>sd', require('telescope.builtin').diagnostics, { de
 require('nvim-treesitter.configs').setup {
   -- Add languages to be installed here that you want installed for treesitter
   -- ensure_installed = { 'c', 'cpp', 'go', 'lua', 'python', 'rust', 'tsx', 'typescript', 'help', 'vim' },
-  ensure_installed = "all",
+  ensure_installed = 'all',
 
   -- Autoinstall languages that are not installed. Defaults to false (but you can change for yourself!)
   auto_install = false,
@@ -297,6 +409,12 @@ require('nvim-treesitter.configs').setup {
   },
   autopairs = {
     enable = true,
+  },
+  context_commentstring = {
+    enable = true,
+    config = {
+      css = '// %s',
+    },
   },
   highlight = { enable = true },
   indent = { enable = true, disable = { 'python' } },
@@ -341,6 +459,24 @@ require('nvim-treesitter.configs').setup {
       goto_previous_end = {
         ['[M'] = '@function.outer',
         ['[]'] = '@class.outer',
+      },
+    },
+    rainbow = {
+      enable = true,
+      -- list of languages you want to disable the plugin for
+      -- disable = { 'jsx', 'cpp' },
+      -- Which query to use for finding delimiters
+      query = 'rainbow-parens',
+      -- Highlight the entire buffer all at once
+      strategy = require 'ts-rainbow.strategy.global',
+    },
+    refactor = {
+      highlight_current_scope = { enable = true },
+      smart_rename = {
+        enable = true,
+        keymaps = {
+          smart_rename = 'grr',
+        },
       },
     },
     swap = {
@@ -406,6 +542,7 @@ local on_attach = function(_, bufnr)
   end, { desc = 'Format current buffer with LSP' })
 end
 
+local lspconfig = require 'lspconfig'
 -- Enable the following language servers
 --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
 --
@@ -413,16 +550,87 @@ end
 --  the `settings` field of the server config. You must look up that documentation yourself.
 local servers = {
   -- clangd = {},
+  emmet_ls = {
+    cmd = { 'ls_emmet', '--stdio' },
+    filetypes = {
+      'html',
+      'css',
+      'scss',
+      'javascript',
+      'javascriptreact',
+      'typescript',
+      'typescriptreact',
+      'haml',
+      'xml',
+      'xsl',
+      'pug',
+      'slim',
+      'sass',
+      'stylus',
+      'less',
+      'sss',
+      'hbs',
+      'handlebars',
+    },
+  },
   -- gopls = {},
-  -- pyright = {},
+  pyright = {
+    python = {
+      analysis = {
+        -- typeCheckingMode = "off",
+        autoSearchPaths = true,
+        useLibraryCodeForTypes = true,
+        diagnosticMode = 'workspace',
+      },
+    },
+  },
+  terraformls = {},
+  -- sqls = {},
+  graphql = {},
+  dockerls = {},
+  docker_compose_language_service = {},
   -- rust_analyzer = {},
+  html = {},
+  cssls = {
+    filetypes = {
+      'html',
+      'css',
+      'scss',
+      'javascript',
+      'javascriptreact',
+      'typescript',
+      'typescriptreact',
+      'haml',
+      'xml',
+      'xsl',
+      'pug',
+      'slim',
+      'sass',
+      'stylus',
+      'less',
+      'sss',
+      'hbs',
+      'handlebars',
+    },
+  },
+  cssmodules_ls = {},
+  eslint = {},
+  jsonls = {
+    settings = {
+      json = {
+        schemas = require('schemastore').json.schemas(),
+        validate = { enable = true },
+      },
+    },
+  },
+  -- vtsls = {},
   tsserver = {
     typescript = {
       inlayHints = {
         includeInlayEnumMemberValueHints = true,
         includeInlayFunctionLikeReturnTypeHints = true,
         includeInlayFunctionParameterTypeHints = true,
-        includeInlayParameterNameHints = "all", -- 'none' | 'literals' | 'all';
+        includeInlayParameterNameHints = 'all', -- 'none' | 'literals' | 'all';
         includeInlayParameterNameHintsWhenArgumentMatchesName = true,
         includeInlayPropertyDeclarationTypeHints = true,
         includeInlayVariableTypeHints = true,
@@ -434,6 +642,9 @@ local servers = {
       workspace = { checkThirdParty = false },
       telemetry = { enable = false },
     },
+  },
+  marksman = {
+    filetypes = { 'markdown', 'vimwiki' },
   },
 }
 
@@ -452,6 +663,7 @@ local mason_lspconfig = require 'mason-lspconfig'
 
 mason_lspconfig.setup {
   ensure_installed = vim.tbl_keys(servers),
+  automatic_installation = true,
 }
 
 mason_lspconfig.setup_handlers {
@@ -468,7 +680,43 @@ mason_lspconfig.setup_handlers {
 local cmp = require 'cmp'
 local luasnip = require 'luasnip'
 
-luasnip.config.setup {}
+luasnip.config.setup {
+  history = true,
+  updateevents = 'TextChanged,TextChangedI',
+}
+
+local has_words_before = function()
+  local line, col = unpack(vim.api.nvim_win_get_cursor(0))
+  return col ~= 0 and vim.api.nvim_buf_get_lines(0, line - 1, line, true)[1]:sub(col, col):match '%s' == nil
+end
+
+local kind_icons = {
+  Text = '',
+  Method = '',
+  Function = '',
+  Constructor = '',
+  Field = '',
+  Variable = '',
+  Class = '',
+  Interface = '',
+  Module = '',
+  Property = '',
+  Unit = '',
+  Value = '',
+  Enum = '',
+  Keyword = '',
+  Snippet = '',
+  Color = '',
+  File = '',
+  Reference = '',
+  Folder = '',
+  EnumMember = '',
+  Constant = '',
+  Struct = '',
+  Event = '',
+  Operator = '',
+  TypeParameter = '',
+}
 
 cmp.setup {
   snippet = {
@@ -487,8 +735,12 @@ cmp.setup {
     ['<Tab>'] = cmp.mapping(function(fallback)
       if cmp.visible() then
         cmp.select_next_item()
+      elseif luasnip.expandable() then
+        luasnip.expand()
       elseif luasnip.expand_or_jumpable() then
         luasnip.expand_or_jump()
+      elseif has_words_before() then
+        cmp.complete()
       else
         fallback()
       end
@@ -503,43 +755,114 @@ cmp.setup {
       end
     end, { 'i', 's' }),
   },
+  formatting = {
+    fields = { 'kind', 'abbr', 'menu' },
+    format = function(entry, vim_item)
+      vim_item.kind = kind_icons[vim_item.kind]
+      if entry.completion_item.detail ~= nil and entry.completion_item.detail ~= '' then
+        vim_item.menu = entry.completion_item.detail
+      else
+        vim_item.menu = ({
+              nvim_lsp = '[LSP]',
+              luasnip = '[Snippet]',
+              buffer = '[Buffer]',
+              treesitter = '[Treesitter]',
+              path = '[Path]',
+              nvim_lsp_signature_help = '[Param]',
+              npm = '[NPM]',
+              git = '[Git]',
+              omni = '[Omni]',
+            })[entry.source.name]
+
+        -- vim_item.menu = ({
+        --   nvim_lsp = "",
+        --   nvim_lua = "",
+        --   luasnip = "",
+        --   buffer = "",
+        --   path = "",
+        --   emoji = "",
+        -- })[entry.source.name]
+      end
+      return vim_item
+    end,
+  },
   sources = {
     { name = 'nvim_lsp' },
+    { name = 'nvim_lsp_signature_help' },
     { name = 'luasnip' },
-    { name = "path" },
-    { name = "buffer" },
-    { name = "treesitter" },
+    -- { name = 'nvim_lua' },
+    { name = 'treesitter' },
+    -- { name = 'git' },
+    { name = 'buffer' },
+    { name = 'path' },
+    -- {
+    --   name = 'npm',
+    --   keyword_length = 4,
+    -- },
+    { name = 'omni' },
+    -- {
+    --   name = 'buffer-lines',
+    -- },
   },
-  experimental = {
-    native_menu = false,
-    ghost_text = true,
-  },
+  -- completion = { completeopt = 'menu,menuone,noinsert' },
+  -- sorting = {
+  --   comparators = {
+  --     cmp.config.compare.locality,
+  --     cmp.config.compare.recently_used,
+  --     cmp.config.compare.score,
+  --     cmp.config.compare.offset,
+  --     cmp.config.compare.order,
+  --     -- cmp.config.compare.exact,
+  --     -- cmp.config.compare.kind,
+  --     -- cmp.config.compare.sort_text,
+  --     -- cmp.config.compare.length,
+  --   },
+  -- },
+  -- experimental = {
+  -- native_menu = false,
+  -- ghost_text = true,
+  -- },
 }
--- Use buffer source for `/` (if you enabled `native_menu`, this won't work anymore).
-cmp.setup.cmdline('/', {
+-- Set configuration for specific filetype.
+cmp.setup.filetype('gitcommit', {
+  sources = cmp.config.sources({
+    { name = 'cmp_git' }, -- You can specify the `cmp_git` source if you were installed it.
+  }, {
+    { name = 'buffer' },
+  }),
+})
+
+-- Use buffer source for `/` and `?` (if you enabled `native_menu`, this won't work anymore).
+cmp.setup.cmdline({ '/', '?' }, {
   mapping = cmp.mapping.preset.cmdline(),
   sources = {
-    { name = 'nvim_lsp_document_symbol' },
     { name = 'buffer' },
-  }
+  },
 })
 
 -- Use cmdline & path source for ':' (if you enabled `native_menu`, this won't work anymore).
 cmp.setup.cmdline(':', {
   mapping = cmp.mapping.preset.cmdline(),
   sources = cmp.config.sources({
-    { name = 'path' }
+    { name = 'path' },
   }, {
-    { name = 'cmdline' }
-  })
+    { name = 'cmdline' },
+  }),
 })
+
 -- If you want insert `(` after select function or method item
-local cmp_autopairs = require('nvim-autopairs.completion.cmp')
-cmp.event:on(
-  'confirm_done',
-  cmp_autopairs.on_confirm_done()
-)
-require "custom.keymaps"
+local cmp_autopairs = require 'nvim-autopairs.completion.cmp'
+-- cmp.event:on('confirm_done', cmp_autopairs.on_confirm_done())
+cmp.event:on('confirm_done', cmp_autopairs.on_confirm_done { map_char = { tex = '' } })
+
+require('luasnip.loaders.from_vscode').load()
+
+vim.g.markdown_fenced_languages = {
+  'ts=typescript',
+}
+
+require 'custom.keymaps'
+require 'custom.autocommands'
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
